@@ -1,0 +1,13 @@
+name: drlnd
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.6
+  - pytorch
+  - pip
+  - pip:
+    - ./python/
+    - wandb
+    - h5py
+  - seaborn
