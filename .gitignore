@@ -162,10 +162,8 @@ cython_debug/
 # Jupyter files
 
 # Unity environment
-ReacherMulti/**
-!ReacherMulti/.gitkeep
-ReacherOne/**
-!ReacherOne/.gitkeep
+Tennis/**
+!Tennis/.gitkeep
 *.log
 
 # Agents
