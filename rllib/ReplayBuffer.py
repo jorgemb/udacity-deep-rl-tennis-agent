@@ -32,10 +32,21 @@ class ReplayBuffer:
         """Randomly sample a batch of experiences from memory."""
         experiences = random.sample(self.memory, k=self.batch_size)
 
-        states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(self.device)
-        actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(self.device)
+        # DEBUG
+        # print('States selection: ', np.array([e.state for e in experiences if e is not None]).shape)
+        # print('States selection: ', np.vstack([e.state for e in experiences if e is not None]).shape)
+        # print('Actions selection: ', np.array([e.action for e in experiences if e is not None]).shape)
+        # print('Actions selection: ', np.vstack([e.action for e in experiences if e is not None]).shape)
+        # print('Rewards: ', np.vstack([e.reward for e in experiences if e is not None]).shape)
+
+        # states = torch.from_numpy(np.vstack([e.state for e in experiences if e is not None])).float().to(self.device)
+        states = torch.from_numpy(np.array([e.state for e in experiences if e is not None])).float().to(self.device)
+        # actions = torch.from_numpy(np.vstack([e.action for e in experiences if e is not None])).float().to(self.device)
+        actions = torch.from_numpy(np.array([e.action for e in experiences if e is not None])).float().to(self.device)
         rewards = torch.from_numpy(np.vstack([e.reward for e in experiences if e is not None])).float().to(self.device)
-        next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(
+        # next_states = torch.from_numpy(np.vstack([e.next_state for e in experiences if e is not None])).float().to(
+        #     self.device)
+        next_states = torch.from_numpy(np.array([e.next_state for e in experiences if e is not None])).float().to(
             self.device)
         dones = torch.from_numpy(np.vstack([e.done for e in experiences if e is not None]).astype(np.uint8)).float().to(
             self.device)

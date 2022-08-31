@@ -10,7 +10,7 @@ from unityagents import UnityEnvironment
 
 import wandb
 from AbstractAgent import AbstractAgent, RandomAgent
-from DDPGAgent import DDPGAgent
+from MADDPGAgent import MADDPGAgent, NaiveMADDPGAgent
 
 
 def create_agent(state_space, action_space, **kwargs):
@@ -24,8 +24,10 @@ def create_agent(state_space, action_space, **kwargs):
 
     if agent_name == 'RandomAgent':
         return RandomAgent(state_space, action_space, **kwargs)
-    elif agent_name == 'DDPGAgent':
-        return DDPGAgent(state_space, action_space, **kwargs)
+    elif agent_name == 'MADDPGAgent':
+        return MADDPGAgent(state_space[1], action_space, 2, **kwargs)
+    elif agent_name == 'NaiveMADDPGAgent':
+        return NaiveMADDPGAgent(state_space[1], action_space, 2, **kwargs)
     else:
         raise f'Unkown agent: {agent_name}'
 
@@ -59,7 +61,8 @@ def do_experiment(environment, brain_name, agent: AbstractAgent, total_episodes:
         })
 
         if ep % print_every == 0:
-            print(f"{agent.agent_name()} :: ({ep}/{total_episodes}) AVG {np.average(scores[max(0, i - print_every):ep])}")
+            print(
+                f"{agent.agent_name()} :: ({ep}/{total_episodes}) AVG {np.average(scores[max(0, i - print_every):ep])}")
 
     return scores, times
 
@@ -78,7 +81,7 @@ def do_episode(environment, brain_name, agent, learn=True):
     env_info = environment.reset(train_mode=True)[brain_name]
 
     # Start the agent
-    state = env_info.vector_observations[0]
+    state = env_info.vector_observations
     next_action = agent.start(state)
 
     # Take the first action
@@ -88,7 +91,7 @@ def do_episode(environment, brain_name, agent, learn=True):
         # Take a step from the agent
         reward = env_info.rewards[0]
         episode_score += reward
-        state = env_info.vector_observations[0]
+        state = env_info.vector_observations
 
         next_action = agent.step(state, reward, learn=learn)
 
@@ -105,16 +108,16 @@ def do_episode(environment, brain_name, agent, learn=True):
 
 if __name__ == '__main__':
     # Load environment and get initial brain
-    env = UnityEnvironment(file_name='ReacherOne/Reacher.x86_64', no_graphics=True)
+    env = UnityEnvironment(file_name='Tennis/Tennis.x86_64', no_graphics=True)
     brain_name = env.brain_names[0]
     brain = env.brains[brain_name]
 
     # Initialize environment for use of the agent
     env_info = env.reset(train_mode=True)[brain_name]
     action_space = brain.vector_action_space_size
-    state_space = env_info.vector_observations.size
+    state_space = env_info.vector_observations.shape
 
-    with wandb.init(project='nanorl-p2', entity='jorelmb') as run:
+    with wandb.init(project='nanorl-p3', entity='jorelmb') as run:
         episodes = wandb.config.episodes
         print_every = 100
 
@@ -123,7 +126,7 @@ if __name__ == '__main__':
         agent_name = agent.agent_name()
 
         # Print scores
-        print(f"Last score: {scores[-1]:.4f}, Average: {np.average(scores[max(0, len(scores)-print_every):]):.4f}")
+        print(f"Last score: {scores[-1]:.4f}, Average: {np.average(scores[max(0, len(scores) - print_every):]):.4f}")
 
         # Save agent
         torch.save(agent, f"agents/{agent_name}-{run.id}.pt")

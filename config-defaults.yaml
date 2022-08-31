@@ -1,0 +1,33 @@
+# Default configuration to use for experiment tracking with Weights and Biases
+episodes:
+  desc: Number of episodes to run
+  value: 1000
+avg_window:
+  desc: Window of running average to use when showing the final graph
+  value: 100
+
+# Agent related settings
+agent:
+  desc: Agent to use for training
+  value: NaiveMADDPGAgent
+gamma:
+  desc: Discount factor to use when calculating value function
+  value: 0.91
+alpha:
+  desc: Learning rate (step size) of the learning algorithm
+  value: 0.0005
+tau:
+  desc: Factor to soften weight copying between the target and local networks
+  value: 0.001
+batch_size:
+  desc: Number of elements to take on each learning step from the replay buffer
+  value: 128
+buffer_size:
+  desc: Size of the replay buffer
+  value: 100000
+learn_every:
+  desc: Number of steps to skip between learning steps
+  value: 11
+seed:
+  desc: Seed to use when initializing random generators
+  value: 394212
