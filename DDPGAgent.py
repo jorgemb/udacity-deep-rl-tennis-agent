@@ -1,3 +1,4 @@
+import copy
 from turtle import forward
 import torch
 import torch.nn as nn
@@ -43,6 +44,45 @@ class Actor(nn.Module):
         return F.tanh(self.fc2(x))
 
 
+class ActorModified(nn.Module):
+    """Actor (Policy) Model."""
+
+    def __init__(self, state_size, action_size, seed, fc1_units=100, fc2_units=75, fc3_units=75):
+        """Initialize parameters and build model.
+        Params
+        ======
+            state_size (int): Dimension of each state
+            action_size (int): Dimension of each action
+            seed (int): Random seed
+            fc1_units (int): Number of nodes in first hidden layer
+            fc2_units (int): Number of nodes in second hidden layer
+            fc3_units (int): Number of nodes in second hidden layer
+        """
+        super(ActorModified, self).__init__()
+        # self.seed = torch.manual_seed(seed)
+        self.seed = seed
+        self.fc1 = nn.Linear(state_size, fc1_units)
+        self.bn1 = nn.BatchNorm1d(fc1_units)
+        self.fc2 = nn.Linear(fc1_units, fc2_units)
+        self.fc3 = nn.Linear(fc2_units, fc3_units)
+        self.fc4 = nn.Linear(fc3_units, action_size)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
+        self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
+        self.fc3.weight.data.uniform_(*hidden_init(self.fc3))
+        self.fc4.weight.data.uniform_(-3e-3, 3e-3)
+
+    def forward(self, state):
+        """Build an actor (policy) network that maps states -> actions."""
+        state = state.unsqueeze(0) if state.dim() == 1 else state
+        x = self.bn1(F.relu(self.fc1(state)))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        return torch.tanh(self.fc4(x))
+
+
 class Critic(nn.Module):
     """Critic (Value) Model."""
 
@@ -79,25 +119,88 @@ class Critic(nn.Module):
         return self.fc4(x)
 
 
+class CriticModified(nn.Module):
+    """Critic (Value) Model."""
+
+    def __init__(self, state_size, action_size, seed, fcs1_units=100, fc2_units=100):
+        """Initialize parameters and build model.
+        Params
+        ======
+            state_size (int): Dimension of each state
+            action_size (int): Dimension of each action
+            seed (int): Random seed
+            fcs1_units (int): Number of nodes in the first hidden layer
+            fc2_units (int): Number of nodes in the second hidden layer
+        """
+        super(CriticModified, self).__init__()
+        # self.seed = torch.manual_seed(seed)
+        self.seed = seed
+        self.fcs1 = nn.Linear(state_size, fcs1_units)
+        self.bn1 = nn.BatchNorm1d(fcs1_units)
+        self.fc2 = nn.Linear(fcs1_units + action_size, fc2_units)
+        self.fc3 = nn.Linear(fc2_units, 1)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.fcs1.weight.data.uniform_(*hidden_init(self.fcs1))
+        self.fc2.weight.data.uniform_(*hidden_init(self.fc2))
+        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
+
+    def forward(self, state, action):
+        """Build a critic (value) network that maps (state, action) pairs -> Q-values."""
+
+        xs = self.bn1(F.relu(self.fcs1(state)))
+        x = torch.cat((xs, action), dim=1)
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)
+
+
+class OUNoise:
+    """Ornstein-Uhlenbeck process."""
+
+    def __init__(self, size, seed, mu=0., theta=0.15, sigma=0.2):
+        """Initialize parameters and noise process."""
+        self.mu = mu * np.ones(size)
+        self.theta = theta
+        self.sigma = sigma
+        self.seed = np.random.seed(seed)
+        self.state = None
+        self.reset()
+
+    def reset(self):
+        """Reset the internal state (= noise) to mean (mu)."""
+        self.state = copy.copy(self.mu)
+
+    def sample(self):
+        """Update internal state and return it as a noise sample."""
+        x = self.state
+        dx = self.theta * (self.mu - x) + self.sigma * np.array([np.random.random() for i in range(len(x))])
+        self.state = x + dx
+        return self.state
+
+
 class DDPGAgent(AbstractAgent):
     def __init__(self, state_size, action_size, *, gamma=1.0, alpha=0.1, seed=-1, **kwargs) -> None:
         super().__init__(state_size, action_size, gamma=gamma, alpha=alpha, seed=seed, **kwargs)
 
         # Create actor-critic networks
         # Actor
-        self.local_actor = Actor(state_size, action_size, self.seed).to(self.device)
-        self.target_actor = Actor(state_size, action_size, self.seed).to(self.device)
+        # self.local_actor = Actor(state_size, action_size, self.seed).to(self.device)
+        # self.target_actor = Actor(state_size, action_size, self.seed).to(self.device)
+        self.local_actor = ActorModified(state_size, action_size, self.seed).to(self.device)
+        self.target_actor = ActorModified(state_size, action_size, self.seed).to(self.device)
         self.actor_optimizer = torch.optim.Adam(self.local_actor.parameters(), lr=self.alpha)
 
         # Critic
-        self.local_critic = Critic(state_size, action_size, self.seed).to(self.device)
-        self.target_critic = Critic(state_size, action_size, self.seed).to(self.device)
+        self.local_critic = CriticModified(state_size, action_size, self.seed).to(self.device)
+        self.target_critic = CriticModified(state_size, action_size, self.seed).to(self.device)
         self.critic_optimizer = torch.optim.Adam(self.local_critic.parameters(), lr=self.alpha)
 
-        self.random_process = random_process.OrnsteinUhlenbeckProcess(
-            size=(self.action_size,),
-            std=schedule.LinearSchedule(0.2)
-        )
+        # self.random_process = random_process.OrnsteinUhlenbeckProcess(
+        #     size=(self.action_size,),
+        #     std=schedule.LinearSchedule(0.02)
+        # )
+        self.random_process = OUNoise(self.action_size, self.seed)
 
         self.last_state = None
         self.last_action = None
@@ -132,7 +235,8 @@ class DDPGAgent(AbstractAgent):
 
         if add_noise:
             action += self.random_process.sample()
-        return np.clip(action, -1, 1)
+
+        return np.clip(action, -1, 1)[0]
 
     def start(self, state):
         self.step_n = 1
@@ -215,88 +319,24 @@ class DDPGAgent(AbstractAgent):
         )
 
 
-class ModifiedDDPGAgent(AbstractAgent):
+class ModifiedDDPGAgent(DDPGAgent):
     def __init__(self, state_size, action_size, total_agents, agent_number, shared_replay, *, gamma=1.0, alpha=0.1,
                  seed=-1, **kwargs) -> None:
         super().__init__(state_size, action_size, gamma=gamma, alpha=alpha, seed=seed, **kwargs)
 
         self.agent_number = agent_number
 
-        # Create actor-critic networks
-        # Actor
-        self.local_actor = Actor(state_size, action_size, self.seed).to(self.device)
-        self.target_actor = Actor(state_size, action_size, self.seed).to(self.device)
-        self.actor_optimizer = torch.optim.Adam(self.local_actor.parameters(), lr=self.alpha)
-
-        # Critic
-        # self.local_critic = Critic(state_size * total_agents, action_size, self.seed).to(self.device)
-        # self.target_critic = Critic(state_size * total_agents, action_size, self.seed).to(self.device)
-        self.local_critic = Critic(state_size * total_agents, action_size, self.seed).to(self.device)
-        self.target_critic = Critic(state_size * total_agents, action_size, self.seed).to(self.device)
+        # Modify critic networks
+        self.local_critic = CriticModified(state_size * total_agents, action_size, self.seed).to(self.device)
+        self.target_critic = CriticModified(state_size * total_agents, action_size, self.seed).to(self.device)
         self.critic_optimizer = torch.optim.Adam(self.local_critic.parameters(), lr=self.alpha)
 
-        self.random_process = random_process.OrnsteinUhlenbeckProcess(
-            size=(self.action_size,),
-            std=schedule.LinearSchedule(0.2)
-        )
-
-        self.last_state = None
-        self.last_action = None
-        self.step_n = 0
-
-        # Hyper-parameters
-        self.buffer_size = kwargs.get('buffer_size')
-        self.batch_size = kwargs.get('batch_size')
-        self.tau = kwargs.get('tau')
-        self.learn_every = kwargs.get('learn_every', 10)
-
+        # Add shared replay
         self.shared_replay = shared_replay
-
-    def take_action(self, state: np.array, add_noise: bool = True):
-        """
-        Takes an action using the local actor or a random value
-        @param state:
-        @param add_noise:
-        @return:
-        """
-        # Get action without training
-        s = torch.from_numpy(state[self.agent_number]).float().to(self.device)
-        self.local_actor.eval()
-        with torch.no_grad():
-            action = self.local_actor(s).cpu().data.numpy()
-        self.local_actor.train()
-
-        if add_noise:
-            action += self.random_process.sample()
-        return np.clip(action, -1, 1)
-
-    def start(self, state):
-        self.step_n = 1
-
-        # Take and action and store
-        self.last_state = np.asarray(state, dtype=float)
-        self.last_action = self.take_action(state, True)
-        return self.last_action
-
-    def step(self, state, reward, learn=True):
-        # Get next action
-        self.last_state = state
-        self.last_action = self.take_action(state, add_noise=True)
-        self.step_n += 1
-
-        # Check if we should do a learning step
-        if learn and self.shared_replay is not None and len(
-                self.shared_replay) > self.batch_size and self.step_n % self.learn_every == 0:
-            self.learn_step()
-
-        return self.last_action
 
     def learn_step(self):
         # Get sample
         states, actions, rewards, next_states, dones = self.shared_replay.sample()
-
-        # DEBUG
-        # print(f'Shapes: \n\tState: {states.shape}, \n\tActions: {actions.shape}')
 
         # Update critic
         full_states = states.reshape((self.batch_size, -1))
@@ -305,15 +345,12 @@ class ModifiedDDPGAgent(AbstractAgent):
         actor_next_states = next_states[:, self.agent_number, :]
         actor_actions = actions[:, self.agent_number, :]
 
-        # a_next = self.target_actor(next_states[self.agent_number])
         a_next = self.target_actor(actor_next_states)
-        # q_target = self.target_critic(next_states.reshape(-1), a_next)
         q_target = self.target_critic(full_next_states, a_next)
         q_target = self.gamma * (1 - dones) * q_target + rewards
         q_target = q_target.detach()
 
         # .. compute expected
-        # q_expected = self.local_critic(states.reshape(-1), actions)
         q_expected = self.local_critic(full_states, actor_actions)
         critic_loss = F.mse_loss(q_expected, q_target)
 
@@ -323,9 +360,7 @@ class ModifiedDDPGAgent(AbstractAgent):
         self.critic_optimizer.step()
 
         # Update actor
-        # a_predicted = self.local_actor(states[self.agent_number])
         a_predicted = self.local_actor(actor_states)
-        # actor_loss = -self.local_critic(states.reshape(-1), a_predicted).mean()
         actor_loss = -self.local_critic(full_states, a_predicted).mean()
 
         # .. step with optimizer
@@ -337,21 +372,7 @@ class ModifiedDDPGAgent(AbstractAgent):
         self.soft_update(self.target_actor, self.local_actor)
         self.soft_update(self.target_critic, self.local_critic)
 
-    def end(self, reward):
-        # Store the SARS information in the replay buffer
-        # self.shared_replay.add(self.last_state, self.last_action, reward, self.last_state, True)
-        pass
-
-    def soft_update(self, target, src):
-        for target_param, param in zip(target.parameters(), src.parameters()):
-            target_param.detach_()
-            target_param.copy_(target_param * (1.0 - self.tau) +
-                               param * self.tau)
-
     def __getstate__(self):
-        state = self.__dict__.copy()
+        state = super().__getstate__()
         del state['shared_replay']
         return state
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)

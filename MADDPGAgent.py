@@ -1,7 +1,10 @@
+import torch
+import torch.nn.functional as F
+
 from AbstractAgent import AbstractAgent
 import numpy as np
 
-from DDPGAgent import ModifiedDDPGAgent, DDPGAgent
+from DDPGAgent import ModifiedDDPGAgent, DDPGAgent, Critic
 from rllib.ReplayBuffer import ReplayBuffer
 
 
@@ -59,22 +62,12 @@ class MADDPGAgent(AbstractAgent):
         self.last_state = None
         self.last_action = None
 
-        # Use the same actor on both agents
-        # local_actor = self.agents[0].local_actor
-        # target_actor = self.agents[0].target_actor
-        # actor_optimizer = self.agents[0].actor_optimizer
-
-        # for a in self.agents:
-        #     a.local_actor = local_actor
-        #     a.target_actor = target_actor
-        #     a.actor_optimizer = actor_optimizer
-
     def start(self, state):
         self.last_state = np.asarray(state, dtype=float)
         self.last_action = np.zeros((self.total_agents, self.action_size))
 
         for i, agent in enumerate(self.agents):
-            self.last_action[i] = agent.start(state)
+            self.last_action[i] = agent.start(self.last_state[i])
 
         return self.last_action
 
@@ -87,7 +80,7 @@ class MADDPGAgent(AbstractAgent):
         self.last_action = np.zeros((self.total_agents, self.action_size))
 
         for i, agent in enumerate(self.agents):
-            self.last_action[i] = agent.step(state, reward, learn)
+            self.last_action[i] = agent.step(new_state[i], reward, learn)
 
         return self.last_action
 
@@ -113,3 +106,47 @@ class MADDPGAgent(AbstractAgent):
 
         for agent in self.agents:
             agent.shared_replay = self.replay
+
+
+class SharedActorMADDPG(MADDPGAgent):
+    """
+    Uses the MADDP but shares the actor among agents.
+    """
+
+    def __init__(self, state_size, action_size, total_agents, *, gamma=1.0, alpha=0.1, seed=-1, **kwargs) -> None:
+        super().__init__(state_size, action_size, total_agents, gamma=gamma, alpha=alpha, seed=seed, **kwargs)
+
+        local_actor = self.agents[0].local_actor
+        target_actor = self.agents[0].target_actor
+        actor_optimizer = self.agents[0].actor_optimizer
+
+        # Share the actors
+        for agent in self.agents:
+            agent.local_actor = local_actor
+            agent.target_actor = target_actor
+            agent.actor_optimizer = actor_optimizer
+
+
+class SingleDDPG(AbstractAgent):
+    def __init__(self, state_size, action_size, total_agents, *, gamma=1.0, alpha=0.1, seed=-1, **kwargs) -> None:
+        super().__init__(state_size, action_size, gamma=gamma, alpha=alpha, seed=seed, **kwargs)
+
+        self.agent = DDPGAgent(state_size * total_agents, action_size * total_agents, **kwargs)
+        self.total_agents = total_agents
+
+    def start(self, state):
+        state = state.flatten()
+        action = self.agent.start(state)
+
+        return action.reshape((self.total_agents, self.action_size))
+
+    def step(self, state, reward, learn=True):
+        state = state.flatten()
+        action = self.agent.step(state, reward, learn)
+
+        return action.reshape((self.total_agents, self.action_size))
+
+    def end(self, reward):
+        self.agent.end(reward)
+
+

@@ -10,7 +10,7 @@ from unityagents import UnityEnvironment
 
 import wandb
 from AbstractAgent import AbstractAgent, RandomAgent
-from MADDPGAgent import MADDPGAgent, NaiveMADDPGAgent
+from MADDPGAgent import MADDPGAgent, NaiveMADDPGAgent, SharedActorMADDPG, SingleDDPG
 
 
 def create_agent(state_space, action_space, **kwargs):
@@ -23,13 +23,17 @@ def create_agent(state_space, action_space, **kwargs):
     agent_name = kwargs.get('agent')
 
     if agent_name == 'RandomAgent':
-        return RandomAgent(state_space, action_space, **kwargs)
+        return RandomAgent(state_space, action_space*2, **kwargs)
     elif agent_name == 'MADDPGAgent':
         return MADDPGAgent(state_space[1], action_space, 2, **kwargs)
+    elif agent_name == 'SharedActorMADDPG':
+        return SharedActorMADDPG(state_space[1], action_space, 2, **kwargs)
     elif agent_name == 'NaiveMADDPGAgent':
         return NaiveMADDPGAgent(state_space[1], action_space, 2, **kwargs)
+    elif agent_name == 'SingleDDPGAgent':
+        return SingleDDPG(state_space[1], action_space, 2, **kwargs)
     else:
-        raise f'Unkown agent: {agent_name}'
+        raise f'Unknown agent: {agent_name}'
 
 
 def do_experiment(environment, brain_name, agent: AbstractAgent, total_episodes: int, print_every: int):
