@@ -2,7 +2,6 @@
 # coding: utf-8
 
 import time
-from collections import deque
 
 import numpy as np
 import torch
@@ -10,7 +9,7 @@ from unityagents import UnityEnvironment
 
 import wandb
 from AbstractAgent import AbstractAgent, RandomAgent
-from MADDPGAgent import MADDPGAgent, NaiveMADDPGAgent, SharedActorMADDPG, SingleDDPG
+from MADDPGAgent import NaiveDDPG, SharedReplay, SharedCritic
 
 
 def create_agent(state_space, action_space, **kwargs):
@@ -23,15 +22,13 @@ def create_agent(state_space, action_space, **kwargs):
     agent_name = kwargs.get('agent')
 
     if agent_name == 'RandomAgent':
-        return RandomAgent(state_space, action_space*2, **kwargs)
-    elif agent_name == 'MADDPGAgent':
-        return MADDPGAgent(state_space[1], action_space, 2, **kwargs)
-    elif agent_name == 'SharedActorMADDPG':
-        return SharedActorMADDPG(state_space[1], action_space, 2, **kwargs)
-    elif agent_name == 'NaiveMADDPGAgent':
-        return NaiveMADDPGAgent(state_space[1], action_space, 2, **kwargs)
-    elif agent_name == 'SingleDDPGAgent':
-        return SingleDDPG(state_space[1], action_space, 2, **kwargs)
+        return RandomAgent(state_space, action_space * 2, **kwargs)
+    elif agent_name == 'NaiveDDPG':
+        return NaiveDDPG(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'SharedReplay':
+        return SharedReplay(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'SharedCritic':
+        return SharedCritic(state_space, action_space, 2, **kwargs)
     else:
         raise f'Unknown agent: {agent_name}'
 
@@ -93,19 +90,19 @@ def do_episode(environment, brain_name, agent, learn=True):
 
     while not env_info.local_done[0]:
         # Take a step from the agent
-        reward = env_info.rewards[0]
-        episode_score += reward
+        rewards = env_info.rewards
+        episode_score += np.sum(rewards)
         state = env_info.vector_observations
 
-        next_action = agent.step(state, reward, learn=learn)
+        next_action = agent.step(state, rewards, learn=learn)
 
         # Perform action
         env_info = environment.step(next_action)[brain_name]
 
     # Register last reward to the agent
-    reward = env_info.rewards[0]
-    episode_score += reward
-    agent.end(reward)
+    rewards = env_info.rewards
+    episode_score += np.sum(rewards)
+    agent.end(rewards)
 
     return episode_score
 
@@ -125,7 +122,7 @@ if __name__ == '__main__':
         episodes = wandb.config.episodes
         print_every = 100
 
-        agent = create_agent(state_space, action_space, **wandb.config)
+        agent = create_agent(state_space[1], action_space, **wandb.config)
         scores, _ = do_experiment(env, brain_name, agent, episodes, print_every)
         agent_name = agent.agent_name()
 
