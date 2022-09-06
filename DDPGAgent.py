@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -5,6 +7,8 @@ import torch.nn.functional as F
 
 from AbstractAgent import AbstractAgent
 from rllib import random_process, schedule, ReplayBuffer
+from rllib.OUNoise import OUNoise
+from rllib.schedule import LinearSchedule
 
 
 def hidden_init(layer):
@@ -98,6 +102,9 @@ class DDPGAgent(AbstractAgent):
             std=schedule.LinearSchedule(0.2)
         )
 
+        # Epsilon process for random search
+        self.epsilon_process = LinearSchedule(1.0, 0.05, kwargs.get('epsilon_steps', 10000))
+
         self.last_state = None
         self.last_action = None
         self.step_n = 0
@@ -122,6 +129,11 @@ class DDPGAgent(AbstractAgent):
         @param add_noise:
         @return:
         """
+        # Check if doing random process
+        val = random.random()
+        if add_noise and val > self.epsilon_process():
+            return np.random.uniform(-1, 1, self.action_size)
+
         # Get action without training
         s = torch.from_numpy(state).float().to(self.device)
         self.local_actor.eval()
@@ -130,6 +142,7 @@ class DDPGAgent(AbstractAgent):
         self.local_actor.train()
 
         if add_noise:
+            # action += self.random_process.sample()
             action += self.random_process.sample()
         return np.clip(action, -1, 1)
 
@@ -212,3 +225,69 @@ class DDPGAgent(AbstractAgent):
             batch_size=self.batch_size,
             device=self.device
         )
+
+
+class ModifiedDDPGAgent(DDPGAgent):
+    def __init__(self, state_size, action_size, total_agents, agent_number, shared_replay, *, gamma=1.0, alpha=0.1,
+                 seed=-1, **kwargs) -> None:
+        super().__init__(state_size, action_size, gamma=gamma, alpha=alpha, seed=seed, **kwargs)
+
+        self.agent_number = agent_number
+
+        # Modify critic networks
+        self.local_critic = Critic(state_size * total_agents, action_size, self.seed, 512, 512, 256).to(self.device)
+        self.target_critic = Critic(state_size * total_agents, action_size, self.seed, 512, 512, 256).to(self.device)
+        self.critic_optimizer = torch.optim.Adam(self.local_critic.parameters(), lr=self.alpha)
+
+        # Add shared replay
+        self.shared_replay = shared_replay
+
+    def learn_step(self):
+        # Get sample
+        states, actions, rewards, next_states, dones = self.shared_replay.sample()
+
+        # Update critic
+        full_states = states.reshape((self.batch_size, -1))
+        # print(f'Full states: {full_states.shape}')
+        full_next_states = next_states.reshape((self.batch_size, -1))
+        # print(f'Full next states: {full_next_states.shape}')
+        actor_states = states[:, self.agent_number, :]
+        # print(f'Actor states: {actor_states.shape}')
+        actor_next_states = next_states[:, self.agent_number, :]
+        # print(f'Actor next states: {actor_next_states.shape}')
+        actor_actions = actions[:, self.agent_number, :]
+        # print(f'Actor actions: {actor_actions.shape}')
+        rewards = rewards[:, self.agent_number].unsqueeze(dim=1)
+        # print(f'Rewards: {rewards.shape}')
+
+        a_next = self.target_actor(actor_next_states)
+        q_target = self.target_critic(full_next_states, a_next)
+        q_target = self.gamma * (1 - dones) * q_target + rewards
+        q_target = q_target.detach()
+
+        # .. compute expected
+        q_expected = self.local_critic(full_states, actor_actions)
+        critic_loss = F.mse_loss(q_expected, q_target)
+
+        # .. step with optimizer
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+
+        # Update actor
+        a_predicted = self.local_actor(actor_states)
+        actor_loss = -self.local_critic(full_states, a_predicted).mean()
+
+        # .. step with optimizer
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        # Soft update the networks
+        self.soft_update(self.target_actor, self.local_actor)
+        self.soft_update(self.target_critic, self.local_critic)
+
+    def __getstate__(self):
+        state = super().__getstate__()
+        del state['shared_replay']
+        return state

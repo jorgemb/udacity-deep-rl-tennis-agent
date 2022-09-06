@@ -9,7 +9,7 @@ from unityagents import UnityEnvironment
 
 import wandb
 from AbstractAgent import AbstractAgent, RandomAgent
-from MADDPGAgent import NaiveDDPG, SharedReplay, SharedCritic
+from MADDPGAgent import NaiveDDPG, SharedReplay, SharedCritic, MADDPGAgent
 
 
 def create_agent(state_space, action_space, **kwargs):
@@ -29,6 +29,8 @@ def create_agent(state_space, action_space, **kwargs):
         return SharedReplay(state_space, action_space, 2, **kwargs)
     elif agent_name == 'SharedCritic':
         return SharedCritic(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'MADDPGAgent':
+        return MADDPGAgent(state_space, action_space, 2, **kwargs)
     else:
         raise f'Unknown agent: {agent_name}'
 
@@ -109,7 +111,7 @@ def do_episode(environment, brain_name, agent, learn=True):
 
 if __name__ == '__main__':
     # Load environment and get initial brain
-    env = UnityEnvironment(file_name='Tennis/Tennis.x86_64', no_graphics=True)
+    env = UnityEnvironment(file_name='Tennis/Tennis.x86_64', no_graphics=False)
     brain_name = env.brain_names[0]
     brain = env.brains[brain_name]
 

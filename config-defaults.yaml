@@ -9,7 +9,7 @@ avg_window:
 # Agent related settings
 agent:
   desc: Agent to use for training
-  value: SharedCritic
+  value: MADDPGAgent
 gamma:
   desc: Discount factor to use when calculating value function
   value: 0.91
@@ -31,3 +31,6 @@ learn_every:
 seed:
   desc: Seed to use when initializing random generators
   value: 394212
+epsilon_steps:
+  desc: Steps for e-greedy process
+  value: 10000
