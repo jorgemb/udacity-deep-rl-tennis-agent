@@ -80,6 +80,11 @@ def do_experiment(environment, brain_name, agent: AbstractAgent, total_episodes:
             print(
                 f"{agent.agent_name()} :: ({ep}/{total_episodes}) AVG {np.average(scores[max(0, i - print_every):ep])}")
 
+        # Early stop
+        if np.average(scores[max(0, i - 100):ep]) >= 0.5:
+            print(f'Reached target at episode {ep}')
+            break
+
     return scores, times
 
 

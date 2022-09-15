@@ -1,7 +1,7 @@
 # Default configuration to use for experiment tracking with Weights and Biases
 episodes:
   desc: Number of episodes to run
-  value: 4000
+  value: 5000
 avg_window:
   desc: Window of running average to use when showing the final graph
   value: 100
@@ -9,7 +9,7 @@ avg_window:
 # Agent related settings
 agent:
   desc: Agent to use for training
-  value: PriorityAgent_SharedActor
+  value: DobleUber
 gamma:
   desc: Discount factor to use when calculating value function
   value: 0.91
