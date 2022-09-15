@@ -1,14 +1,12 @@
-import random
-
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import dobleuber.ReplayBuffer
 from AbstractAgent import AbstractAgent
-from rllib import random_process, schedule, ReplayBuffer
-from rllib.OUNoise import OUNoise
-from rllib.schedule import LinearSchedule
+from rllib import ReplayBuffer
+from rllib.OUNoise import OUNoise2
 
 
 def hidden_init(layer):
@@ -20,7 +18,7 @@ def hidden_init(layer):
 class Actor(nn.Module):
     """Actor (Policy) Model."""
 
-    def __init__(self, state_size, action_size, seed, fc_units=256):
+    def __init__(self, state_size, action_size, seed, fc_units=256, fc2_units=128):
         """Initialize parameters and build model.
         Params
         ======
@@ -33,17 +31,20 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
         # self.seed = torch.manual_seed(seed)
         self.fc1 = nn.Linear(state_size, fc_units)
-        self.fc2 = nn.Linear(fc_units, action_size)
+        self.fc2 = nn.Linear(fc_units, fc2_units)
+        self.fc3 = nn.Linear(fc2_units, action_size)
         self.reset_parameters()
 
     def reset_parameters(self):
         self.fc1.weight.data.uniform_(*hidden_init(self.fc1))
         self.fc2.weight.data.uniform_(-3e-3, 3e-3)
+        self.fc3.weight.data.uniform_(-3e-3, 3e-3)
 
     def forward(self, state):
         """Build an actor (policy) network that maps states -> actions."""
         x = F.relu(self.fc1(state))
-        return F.tanh(self.fc2(x))
+        x = F.relu(self.fc2(x))
+        return torch.tanh(self.fc3(x))
 
 
 class Critic(nn.Module):
@@ -97,13 +98,15 @@ class DDPGAgent(AbstractAgent):
         self.target_critic = Critic(state_size, action_size, self.seed).to(self.device)
         self.critic_optimizer = torch.optim.Adam(self.local_critic.parameters(), lr=self.alpha)
 
-        self.random_process = random_process.OrnsteinUhlenbeckProcess(
-            size=(self.action_size,),
-            std=schedule.LinearSchedule(0.2)
-        )
+        # self.random_process = random_process.OrnsteinUhlenbeckProcess(
+        #     size=(self.action_size,),
+        #     std=schedule.LinearSchedule(0.2)
+        # )
+
+        self.random_process = OUNoise2(self.action_size, self.seed)
 
         # Epsilon process for random search
-        self.epsilon_process = LinearSchedule(1.0, 0.05, kwargs.get('epsilon_steps', 10000))
+        # self.epsilon_process = LinearSchedule(1.0, 0.05, kwargs.get('epsilon_steps', 10000))
 
         self.last_state = None
         self.last_action = None
@@ -130,9 +133,9 @@ class DDPGAgent(AbstractAgent):
         @return:
         """
         # Check if doing random process
-        val = random.random()
-        if add_noise and val > self.epsilon_process():
-            return np.random.uniform(-1, 1, self.action_size)
+        # val = random.random()
+        # if add_noise and val < self.epsilon_process():
+        #     return np.random.uniform(-1, 1, self.action_size)
 
         # Get action without training
         s = torch.from_numpy(state).float().to(self.device)
@@ -178,7 +181,7 @@ class DDPGAgent(AbstractAgent):
         a_next = self.target_actor(next_states)
         q_target = self.target_critic(next_states, a_next)
         q_target = self.gamma * (1 - dones) * q_target + rewards
-        q_target = q_target.detach()
+        # q_target = q_target.detach()
 
         # .. compute expected
         q_expected = self.local_critic(states, actions)
@@ -235,12 +238,17 @@ class ModifiedDDPGAgent(DDPGAgent):
         self.agent_number = agent_number
 
         # Modify critic networks
-        self.local_critic = Critic(state_size * total_agents, action_size, self.seed, 512, 512, 256).to(self.device)
-        self.target_critic = Critic(state_size * total_agents, action_size, self.seed, 512, 512, 256).to(self.device)
+        self.local_critic = Critic(state_size * total_agents, action_size * total_agents, self.seed, 512, 512, 256).to(
+            self.device)
+        self.target_critic = Critic(state_size * total_agents, action_size * total_agents, self.seed, 512, 512, 256).to(
+            self.device)
         self.critic_optimizer = torch.optim.Adam(self.local_critic.parameters(), lr=self.alpha)
 
         # Add shared replay
         self.shared_replay = shared_replay
+
+        self.other_agents = None
+        self.total_agents = total_agents
 
     def learn_step(self):
         # Get sample
@@ -251,22 +259,28 @@ class ModifiedDDPGAgent(DDPGAgent):
         # print(f'Full states: {full_states.shape}')
         full_next_states = next_states.reshape((self.batch_size, -1))
         # print(f'Full next states: {full_next_states.shape}')
-        actor_states = states[:, self.agent_number, :]
+        # actor_states = states[:, self.agent_number, :]
         # print(f'Actor states: {actor_states.shape}')
-        actor_next_states = next_states[:, self.agent_number, :]
+        # actor_next_states = next_states[:, self.agent_number, :]
         # print(f'Actor next states: {actor_next_states.shape}')
         actor_actions = actions[:, self.agent_number, :]
         # print(f'Actor actions: {actor_actions.shape}')
         rewards = rewards[:, self.agent_number].unsqueeze(dim=1)
         # print(f'Rewards: {rewards.shape}')
 
-        a_next = self.target_actor(actor_next_states)
-        q_target = self.target_critic(full_next_states, a_next)
+        # a_next = self.target_actor(actor_next_states)
+        a_next = np.zeros((self.batch_size, self.total_agents, self.action_size))
+        for i, agent in enumerate(self.other_agents):
+            actor_next_states = next_states[:, i, :]
+            a_next[:, i, :] = agent.target_actor(actor_next_states).cpu().data.numpy()
+        a_next = torch.from_numpy(a_next.reshape((self.batch_size, -1))).float().to(self.device)
+
+        q_target = self.target_critic(full_next_states, a_next.reshape((self.batch_size, -1)))
         q_target = self.gamma * (1 - dones) * q_target + rewards
-        q_target = q_target.detach()
+        # q_target = q_target.detach()
 
         # .. compute expected
-        q_expected = self.local_critic(full_states, actor_actions)
+        q_expected = self.local_critic(full_states, actions.reshape((self.batch_size, -1)))
         critic_loss = F.mse_loss(q_expected, q_target)
 
         # .. step with optimizer
@@ -275,7 +289,12 @@ class ModifiedDDPGAgent(DDPGAgent):
         self.critic_optimizer.step()
 
         # Update actor
-        a_predicted = self.local_actor(actor_states)
+        # a_predicted = self.local_actor(actor_states)
+        a_predicted = np.zeros((self.batch_size, self.total_agents, self.action_size))
+        for i, agent in enumerate(self.other_agents):
+            actor_states = states[:, i, :]
+            a_predicted[:, i, :] = agent.local_actor(actor_states).cpu().data.numpy()
+        a_predicted = torch.from_numpy(a_predicted.reshape((self.batch_size, -1))).float().to(self.device)
         actor_loss = -self.local_critic(full_states, a_predicted).mean()
 
         # .. step with optimizer
@@ -290,4 +309,72 @@ class ModifiedDDPGAgent(DDPGAgent):
     def __getstate__(self):
         state = super().__getstate__()
         del state['shared_replay']
+        del state['other_agents']
         return state
+
+
+class PriorityDDPG(DDPGAgent):
+    def __init__(self, state_size, action_size, *, gamma=1.0, alpha=0.1, seed=-1, **kwargs) -> None:
+        super().__init__(state_size, action_size, gamma=gamma, alpha=alpha, seed=seed, **kwargs)
+
+        self.create_memory()
+
+    def create_memory(self):
+        self.replay = dobleuber.ReplayBuffer.ReplayBuffer(self.action_size, self.buffer_size,
+                                                          self.batch_size, self.batch_size,
+                                                          self.device, self.seed)
+
+    def step(self, state, reward, learn=True):
+        # Update memory
+        if self.step_n % 3000 == 0:
+            self.replay.update_parameters()
+
+        if self.step_n % 20 == 0:
+            self.replay.update_memory_sampling()
+
+        return super().step(state, reward, learn)
+
+    def learn_step(self):
+        # Get sample
+        states, actions, rewards, next_states, dones, indices = self.replay.sample()
+
+        # Update critic
+        a_next = self.target_actor(next_states)
+        q_target = self.target_critic(next_states, a_next)
+        q_target = self.gamma * (1 - dones) * q_target + rewards
+        # q_target = q_target.detach()
+
+        # .. compute expected
+        q_expected = self.local_critic(states, actions)
+        critic_loss = F.mse_loss(q_expected, q_target)
+
+        # .. step with optimizer
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+
+        # Update actor
+        a_predicted = self.local_actor(states)
+        actor_loss = -self.local_critic(states, a_predicted).mean()
+
+        # .. step with optimizer
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        # Soft update the networks
+        self.soft_update(self.target_actor, self.local_actor)
+        self.soft_update(self.target_critic, self.local_critic)
+
+        # Update memory priorities
+        delta = abs(q_target - q_expected).detach.numpy()
+        self.replay.update_priorities(delta, indices)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['replay']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.create_memory()

@@ -9,7 +9,8 @@ from unityagents import UnityEnvironment
 
 import wandb
 from AbstractAgent import AbstractAgent, RandomAgent
-from MADDPGAgent import NaiveDDPG, SharedReplay, SharedCritic, MADDPGAgent
+from MADDPGAgent import NaiveDDPG, SharedReplay, SharedCritic, MADDPGAgent, SingleDDPG, DobleUber, SingleAgent, \
+    PriorityAgent, PriorityAgent_SharedCritic, PriorityAgent_SharedActor
 
 
 def create_agent(state_space, action_space, **kwargs):
@@ -31,11 +32,23 @@ def create_agent(state_space, action_space, **kwargs):
         return SharedCritic(state_space, action_space, 2, **kwargs)
     elif agent_name == 'MADDPGAgent':
         return MADDPGAgent(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'SingleDDPG':
+        return SingleDDPG(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'SingleAgent':
+        return SingleAgent(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'DobleUber':
+        return DobleUber(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'PriorityAgent':
+        return PriorityAgent(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'PriorityAgent_SharedCritic':
+        return PriorityAgent_SharedCritic(state_space, action_space, 2, **kwargs)
+    elif agent_name == 'PriorityAgent_SharedActor':
+        return PriorityAgent_SharedActor(state_space, action_space, 2, **kwargs)
     else:
         raise f'Unknown agent: {agent_name}'
 
 
-def do_experiment(environment, brain_name, agent: AbstractAgent, total_episodes: int, print_every: int):
+def do_experiment(environment, brain_name, agent: AbstractAgent, total_episodes: int, print_every: int, learn=True):
     """Performs an experiment on the given agent.
 
     Args:
@@ -52,7 +65,7 @@ def do_experiment(environment, brain_name, agent: AbstractAgent, total_episodes:
 
     for i in range(total_episodes):
         start_time = time.time()
-        scores[i] = do_episode(environment, brain_name, agent)
+        scores[i] = do_episode(environment, brain_name, agent, learn)
         times[i] = time.time() - start_time
 
         # Log data
@@ -80,8 +93,9 @@ def do_episode(environment, brain_name, agent, learn=True):
     Returns:
         (float, int): Total score and steps of the episode
     """
-    episode_score = 0
-    env_info = environment.reset(train_mode=True)[brain_name]
+    # episode_score = 0
+    agents_score = np.zeros((2, ))
+    env_info = environment.reset(train_mode=learn)[brain_name]
 
     # Start the agent
     state = env_info.vector_observations
@@ -93,7 +107,8 @@ def do_episode(environment, brain_name, agent, learn=True):
     while not env_info.local_done[0]:
         # Take a step from the agent
         rewards = env_info.rewards
-        episode_score += np.sum(rewards)
+        # episode_score += np.max(rewards)
+        agents_score += rewards
         state = env_info.vector_observations
 
         next_action = agent.step(state, rewards, learn=learn)
@@ -103,20 +118,23 @@ def do_episode(environment, brain_name, agent, learn=True):
 
     # Register last reward to the agent
     rewards = env_info.rewards
-    episode_score += np.sum(rewards)
+    # episode_score += np.max(rewards)
+    agents_score += rewards
     agent.end(rewards)
 
-    return episode_score
+    return np.max(agents_score)
 
 
 if __name__ == '__main__':
+    graphics = False
+
     # Load environment and get initial brain
-    env = UnityEnvironment(file_name='Tennis/Tennis.x86_64', no_graphics=False)
+    env = UnityEnvironment(file_name='Tennis/Tennis.x86_64', no_graphics=not graphics)
     brain_name = env.brain_names[0]
     brain = env.brains[brain_name]
 
     # Initialize environment for use of the agent
-    env_info = env.reset(train_mode=True)[brain_name]
+    env_info = env.reset(train_mode=graphics)[brain_name]
     action_space = brain.vector_action_space_size
     state_space = env_info.vector_observations.shape
 
@@ -125,7 +143,7 @@ if __name__ == '__main__':
         print_every = 100
 
         agent = create_agent(state_space[1], action_space, **wandb.config)
-        scores, _ = do_experiment(env, brain_name, agent, episodes, print_every)
+        scores, _ = do_experiment(env, brain_name, agent, episodes, print_every, learn=not graphics)
         agent_name = agent.agent_name()
 
         # Print scores

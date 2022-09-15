@@ -29,13 +29,13 @@ class AbstractAgent:
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         # self.device = "cpu"
 
-        if(seed != -1):
-            random.seed(seed)
+        if seed == -1:
+            self.seed = int.from_bytes(urandom(4), byteorder="little")
         else:
-            seed = int.from_bytes(urandom(4), byteorder="little")
-            random.seed(seed)
-        self.seed = seed
+            self.seed = seed
 
+        random.seed(self.seed)
+        torch.manual_seed(self.seed)
 
     @abstractmethod
     def start(self, state):
